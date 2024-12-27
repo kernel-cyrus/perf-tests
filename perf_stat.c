@@ -23,6 +23,8 @@ int perf_event_open(uint32_t type, uint64_t event_id)
 	attr.config = event_id;
 	attr.disabled = 1;
 
+	//printf("type=%d, event=0x%llx, size=%d\n", attr.type, attr.config, attr.size);
+
 	return __perf_event_open(&attr, 0, -1, -1, 0);
 }
 
@@ -74,14 +76,28 @@ void perf_simple_stat()
 	perf_event_close(fd);
 }
 
-int perf_stat_init_raw_event(struct perf_event *event)
+int __read_event_file(const char* path, char* buf, int buf_size)
 {
 	FILE *file;
+	int n_bytes;
+
+	file = fopen(path, "r");
+	if (file == NULL)
+		return ERROR;
+
+	n_bytes = fread(buf, 1, buf_size - 1, file);
+
+	fclose(file);
+	return n_bytes;
+}
+
+int perf_stat_init_raw_event(struct perf_event *event)
+{
 	char *device_name, *file_name;
 	char file_buf[16];
 	static char file_path[128];
 	static char event_path[128];
-	int n_bytes;
+	int n_bytes, offset, end;
 
 	memset(event_path, 0, sizeof(event_path));
 	strncpy(event_path, event->event_path, sizeof(event_path) - 1);
@@ -97,19 +113,36 @@ int perf_stat_init_raw_event(struct perf_event *event)
 	if (!event->event_name)
 		event->event_name = event->event_path + (file_name - event_path);
 
-	sprintf(file_path, "/sys/bus/event_source/devices/%s/events/%s", device_name, file_name);
+	// Get type
+	sprintf(file_path, "/sys/bus/event_source/devices/%s/type", device_name);
 
-	file = fopen(file_path, "r");
-	if (file == NULL)
-		return ERROR;
-
-	n_bytes = fread(file_buf, 1, sizeof(file_buf) - 1, file);
-	if (!n_bytes)
+	n_bytes = __read_event_file(file_path, file_buf, sizeof(file_buf));
+	if (n_bytes <= 0)
 		return ERROR;
 
 	file_buf[n_bytes] = '\0';
+	event->type = atoi(file_buf);
 
+	// Get format
+	sprintf(file_path, "/sys/bus/event_source/devices/%s/format/event", device_name);
+
+	n_bytes = __read_event_file(file_path, file_buf, sizeof(file_buf));
+	if (n_bytes <= 0)
+		return ERROR;
+
+	file_buf[n_bytes] = '\0';
+	sscanf(file_buf, "config:%d-%d", &offset, &end);
+
+	// Get event
+	sprintf(file_path, "/sys/bus/event_source/devices/%s/events/%s", device_name, file_name);
+
+	n_bytes = __read_event_file(file_path, file_buf, sizeof(file_buf));
+	if (n_bytes <=0 )
+		return ERROR;
+
+	file_buf[n_bytes] = '\0';
 	sscanf(file_buf, "event=%lX", &event->event_id);
+	event->event_id = event->event_id << offset;
 
 	return SUCCESS;
 }
