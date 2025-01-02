@@ -12,7 +12,7 @@ int __perf_event_open(struct perf_event_attr *attr, pid_t pid, int cpu, int grou
 	return syscall(__NR_perf_event_open, attr, pid, cpu, group_fd, flags);
 }
 
-int perf_event_open(uint32_t type, uint64_t event_id)
+int perf_event_open(uint32_t type, uint64_t event_id, int cpu)
 {
 	struct perf_event_attr attr;
 
@@ -25,7 +25,8 @@ int perf_event_open(uint32_t type, uint64_t event_id)
 
 	//printf("type=%d, event=0x%llx, size=%d\n", attr.type, attr.config, attr.size);
 
-	return __perf_event_open(&attr, 0, -1, -1, 0);
+	// see perf_event_open(2) pid and cpu
+	return __perf_event_open(&attr, cpu < 0 ? 0 : -1, cpu, -1, PERF_FLAG_FD_CLOEXEC);
 }
 
 int perf_event_start(int fd)
@@ -60,7 +61,7 @@ void perf_simple_stat()
 	int fd;
 	uint64_t count;
 
-	fd = perf_event_open(PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_CLOCK);
+	fd = perf_event_open(PERF_TYPE_SOFTWARE, PERF_COUNT_SW_CPU_CLOCK, -1);
 	if (fd < 0) {
 		printf("ERROR: Event not supported.");
 		exit(-1);
@@ -161,7 +162,7 @@ void perf_stat_init_events(struct perf_event *events, int event_num)
 	}
 }
 
-int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *events, int event_num)
+int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *events, int event_num, int cpu)
 {
 	if (!stat || !name || !events)
 		return ERROR;
@@ -174,6 +175,7 @@ int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *
 	memset(stat, 0, sizeof(struct perf_stat));
 	stat->events = events;
 	stat->event_num = event_num;
+	stat->cpu = cpu;
 	strncpy(stat->name, name, sizeof(stat->name) - 1);
 
 	return SUCCESS;
@@ -182,7 +184,7 @@ int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *
 void perf_stat_begin(struct perf_stat *stat)
 {
 	for (int i = 0; i < stat->event_num; i++)
-		stat->event_fds[i] = perf_event_open(stat->events[i].type, stat->events[i].event_id);
+		stat->event_fds[i] = perf_event_open(stat->events[i].type, stat->events[i].event_id, stat->cpu);
 
 	clock_gettime(CLOCK_MONOTONIC, &stat->start);
 

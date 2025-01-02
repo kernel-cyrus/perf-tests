@@ -31,6 +31,7 @@ struct perf_stat {
 	uint64_t event_counts[MAX_PERF_EVENTS];
 	int event_fds[MAX_PERF_EVENTS];
 	int event_num;
+	int cpu;
 	struct timespec start;
 	struct timespec end;
 	long duration;
@@ -39,9 +40,10 @@ struct perf_stat {
 /* easy to use macros */
 #define PERF_STAT_BEGIN(name, events, event_num) 				\
 	do {									\
-		int err;							\
+		int cpu, err;							\
 		struct perf_stat *__stat = malloc(sizeof(struct perf_stat));	\
-		err = perf_stat_init(__stat, name, events, event_num);		\
+		cpu = sched_getcpu()						\
+		err = perf_stat_init(__stat, name, events, event_num, cpu);	\
 		if (err) {							\
 			free(__stat);						\
 			break;							\
@@ -55,14 +57,14 @@ struct perf_stat {
 	} while (0)
 
 /* perf event interfaces */
-int perf_event_open(uint32_t type, uint64_t event_id);
+int perf_event_open(uint32_t type, uint64_t event_id, int cpu);
 int perf_event_start(int fd);
 int perf_event_stop(int fd);
 uint64_t perf_event_read(int fd);
 int perf_event_close(int fd);
 
 /* perf stat interfaces */
-int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *events, int event_num);
+int perf_stat_init(struct perf_stat *stat, const char* name, struct perf_event *events, int event_num, int cpu);
 void perf_stat_begin(struct perf_stat *stat);
 void perf_stat_end(struct perf_stat *stat);
 void perf_stat_report(struct perf_stat *stat);

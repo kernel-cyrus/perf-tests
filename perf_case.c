@@ -11,8 +11,6 @@
 #include "perf_stat.h"
 #include "arch/arm_pmuv3.h"
 
-static int opt_cpu = 0;
-
 static struct perf_option default_options[] = {
 	{{"help",   optional_argument, NULL, 'h' }, "h",  "Help."},
 	{{"cpu",    optional_argument, NULL, 'c' }, "c:", "Choose a CPU to run."},
@@ -203,6 +201,7 @@ static struct perf_event armv8_events[] = {
 	*/
 };
 
+// Orin events, only support run on CPU0
 static struct perf_event orin_events[] = {
 	PERF_RAW_EVENT("scf_pmu/bus_cycles", 			"scf_bus_cycles"),
 	PERF_RAW_EVENT("scf_pmu/bus_access", 			"scf_bus_access"),
@@ -282,6 +281,31 @@ static struct perf_case *perf_cases[] = {
 	PERF_CASE(ustress_store_buffer_full),
 };
 
+static int g_cpu_id = -1;
+
+static void init_cpu(int cpu)
+{
+	int err;
+	pid_t pid = getpid();
+	cpu_set_t mask;
+
+	CPU_ZERO(&mask);
+	CPU_SET(cpu, &mask);
+
+	err = sched_setaffinity(pid, sizeof(mask), &mask);
+	if (err) {
+		printf("ERROR: Set cpu affinity failed.\n");
+		exit(0);
+	}
+	g_cpu_id = cpu;
+	printf("Run on CPU: %d\n", cpu);
+}
+
+static int get_cpu()
+{
+	return g_cpu_id;
+}
+
 struct perf_case* perf_case_find(char* name)
 {
 	int case_num = sizeof(perf_cases) / sizeof(struct perf_case*);
@@ -336,7 +360,8 @@ struct perf_run* perf_case_create_run(struct perf_case *p_case)
 		err = perf_stat_init(									\
 			&p_run->stats[i], p_case->name,							\
 			events + MAX_PERF_EVENTS * i, 							\
-			(i == stat_num - 1) ? (event_num - MAX_PERF_EVENTS * i) : MAX_PERF_EVENTS	\
+			(i == stat_num - 1) ? (event_num - MAX_PERF_EVENTS * i) : MAX_PERF_EVENTS,	\
+			get_cpu()									\
 		);
 		if (err)
 			goto ERR_EXIT;
@@ -519,24 +544,6 @@ static void print_case_help(struct perf_case *p_case)
 	printf("\n");
 }
 
-static void init_cpu(int cpu)
-{
-	int err;
-	pid_t pid = getpid();
-	cpu_set_t mask;
-
-	CPU_ZERO(&mask);
-	CPU_SET(cpu, &mask);
-
-	err = sched_setaffinity(pid, sizeof(mask), &mask);
-	if (err) {
-		printf("ERROR: Set cpu affinity failed.\n");
-		exit(0);
-	}
-
-	printf("Run on CPU: %d\n", cpu);
-}
-
 static void init_opts(struct perf_case *p_case, int argc, char **argv)
 {
 	struct option *opts;
@@ -544,6 +551,7 @@ static void init_opts(struct perf_case *p_case, int argc, char **argv)
 	int opt, opt_idx;
 	int opt_num, def_num;
 	int i, j;
+	int opt_cpu = 0;
 
 	def_num = sizeof(default_options) / sizeof(struct perf_option);
 	opt_num = def_num + p_case->opts_num;
